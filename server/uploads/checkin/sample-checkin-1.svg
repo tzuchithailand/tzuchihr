@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="500" viewBox="0 0 800 500">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0f766e"/>
+      <stop offset="100%" stop-color="#042f2e"/>
+    </linearGradient>
+  </defs>
+  <rect width="800" height="500" fill="url(#sky)"/>
+  <rect x="50" y="80" width="700" height="350" rx="16" fill="#ffffff" opacity="0.95"/>
+  <text x="400" y="140" font-family="sans-serif" font-size="28" font-weight="bold" fill="#0f766e" text-anchor="middle">🏥 BUMRUNGRAD INTERNATIONAL HOSPITAL</text>
+  <text x="400" y="180" font-family="sans-serif" font-size="20" fill="#334155" text-anchor="middle">โรงพยาบาลบำรุงราษฎร์ - ประตูทางเข้าหลัก (Main Lobby)</text>
+  <line x1="100" y1="210" x2="700" y2="210" stroke="#cbd5e1" stroke-width="2"/>
+  <text x="400" y="260" font-family="sans-serif" font-size="22" font-weight="bold" fill="#1e293b" text-anchor="middle">ภาพถ่ายเช็คอินยืนยันตัวตนล่ามหน้างาน</text>
+  <text x="400" y="300" font-family="sans-serif" font-size="16" fill="#64748b" text-anchor="middle">พิกัด GPS: 13.746618, 100.553047 (ความแม่นยำ 8 เมตร)</text>
+  <rect x="250" y="330" width="300" height="50" rx="25" fill="#10b981"/>
+  <text x="400" y="362" font-family="sans-serif" font-size="18" font-weight="bold" fill="#ffffff" text-anchor="middle">✓ CHECKED-IN VERIFIED</text>
+</svg>
