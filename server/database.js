@@ -5,15 +5,15 @@ const fs = require('fs');
 const dbPath = path.join(__dirname, 'webappline.db');
 const db = new Database(dbPath);
 
-// Enable WAL mode for better performance
 db.pragma('journal_mode = WAL');
 
-// Initialize database schema
 function initDatabase() {
   db.exec(`
+    -- 1. ตารางงานล่าม รพ.
     CREATE TABLE IF NOT EXISTS jobs (
       id TEXT PRIMARY KEY,
       job_no TEXT UNIQUE,
+      interpreter_id TEXT,
       interpreter_name TEXT NOT NULL,
       hospital_name TEXT NOT NULL,
       department TEXT,
@@ -33,6 +33,7 @@ function initDatabase() {
       created_at TEXT NOT NULL
     );
 
+    -- 2. ตารางเอกสารทางการแพทย์/ใบรับรองแพทย์
     CREATE TABLE IF NOT EXISTS medical_docs (
       id TEXT PRIMARY KEY,
       job_id TEXT NOT NULL,
@@ -44,80 +45,277 @@ function initDatabase() {
       created_at TEXT NOT NULL,
       FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE CASCADE
     );
+
+    -- 3. ตารางข้อมูลเจ้าหน้าที่เมดิคอลทีม (แพทย์, พยาบาล, เจ้าหน้าที่คลินิก)
+    CREATE TABLE IF NOT EXISTS staff (
+      id TEXT PRIMARY KEY,
+      staff_code TEXT UNIQUE,
+      name TEXT NOT NULL,
+      role TEXT NOT NULL,          -- 'แพทย์', 'พยาบาลวิชาชีพ', 'ผู้ช่วยพยาบาล', 'ประสานงาน', 'เภสัชกร'
+      department TEXT NOT NULL,    -- 'แผนกอายุรกรรม', 'แผนกตรวจสุขภาพ', 'ศูนย์ผู้ป่วยต่างชาติ'
+      license_no TEXT,             -- เลขที่ใบอนุญาตประกอบวิชาชีพ
+      phone TEXT,
+      email TEXT,
+      line_id TEXT,
+      shift_rate REAL DEFAULT 1500, -- ค่าเวร/ค่าตอบแทนต่อกะ (บาท)
+      status TEXT DEFAULT 'active', -- 'active', 'on_leave', 'inactive'
+      notes TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    -- 4. ตารางข้อมูลทีมล่ามแปลภาษา
+    CREATE TABLE IF NOT EXISTS interpreters (
+      id TEXT PRIMARY KEY,
+      interpreter_code TEXT UNIQUE,
+      name TEXT NOT NULL,
+      languages TEXT NOT NULL,     -- 'ภาษาญี่ปุ่น, ภาษาอังกฤษ'
+      certification TEXT,          -- 'JLPT N1, ใบรับรองล่ามการแพทย์ระดับสูง'
+      experience_years INTEGER DEFAULT 3,
+      hourly_rate_clinic REAL DEFAULT 450,    -- อัตราแปลในคลินิก (บาท/ชม.)
+      hourly_rate_hospital REAL DEFAULT 700,  -- อัตราแปลออก รพ. (บาท/ชม.)
+      travel_allowance REAL DEFAULT 300,      -- ค่าเดินทางต่อเคส รพ. (บาท)
+      phone TEXT,
+      email TEXT,
+      line_id TEXT,
+      status TEXT DEFAULT 'available',        -- 'available', 'on_duty', 'off_duty'
+      preferred_hospitals TEXT,               -- 'บำรุงราษฎร์, กรุงเทพ, สมิติเวช'
+      rating REAL DEFAULT 4.9,
+      notes TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    -- 5. ตารางจัดกะทำงาน (แยก team_type: 'medical' vs 'interpreter')
+    CREATE TABLE IF NOT EXISTS shifts (
+      id TEXT PRIMARY KEY,
+      team_type TEXT NOT NULL,     -- 'medical' หรือ 'interpreter'
+      person_id TEXT NOT NULL,     -- staff.id หรือ interpreters.id
+      person_name TEXT NOT NULL,
+      role_or_language TEXT,        -- ตำแหน่ง (แพทย์/พยาบาล) หรือ ภาษาที่แปล
+      shift_name TEXT NOT NULL,    -- 'กะเช้า (08:00 - 16:00)', 'กะบ่าย (14:00 - 22:00)', 'กะดึก/On-Call (22:00 - 08:00)'
+      shift_date TEXT NOT NULL,    -- YYYY-MM-DD
+      start_time TEXT NOT NULL,    -- 08:00
+      end_time TEXT NOT NULL,      -- 16:00
+      workplace TEXT NOT NULL,     -- 'คลินิกหลัก แผนกอายุรกรรม' หรือ 'รพ.บำรุงราษฎร์'
+      status TEXT DEFAULT 'scheduled', -- 'scheduled', 'on_duty', 'completed', 'absent'
+      notes TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    -- 6. ตารางบันทึกเวลาจากเครื่องสแกน HIP CiF93s-VL
+    CREATE TABLE IF NOT EXISTS attendance_logs (
+      id TEXT PRIMARY KEY,
+      device_model TEXT DEFAULT 'HIP CiF93s-VL',
+      device_ip TEXT DEFAULT '192.168.1.201',
+      enroll_no TEXT NOT NULL,         -- รหัสพนักงานในเครื่องสแกน (เช่น 101, 201)
+      person_id TEXT,
+      person_name TEXT NOT NULL,
+      person_type TEXT NOT NULL,       -- 'medical' หรือ 'interpreter'
+      scan_time TEXT NOT NULL,         -- YYYY-MM-DD HH:mm:ss
+      verify_mode TEXT DEFAULT 'Face', -- 'Face' (สแกนใบหน้า), 'Fingerprint', 'Card'
+      punch_state TEXT DEFAULT 'Check-In', -- 'Check-In', 'Check-Out', 'OT-In', 'OT-Out'
+      sync_source TEXT DEFAULT 'network_sync', -- 'network_sync', 'file_import', 'manual'
+      created_at TEXT NOT NULL
+    );
+
+    -- 7. ตารางการตั้งค่าเครื่องสแกน HIP CiF93s-VL
+    CREATE TABLE IF NOT EXISTS device_configs (
+      id TEXT PRIMARY KEY,
+      device_name TEXT NOT NULL,
+      model TEXT DEFAULT 'HIP CiF93s-VL',
+      ip_address TEXT NOT NULL,
+      port INTEGER DEFAULT 4370,
+      comm_key TEXT DEFAULT '0',
+      is_active INTEGER DEFAULT 1,
+      last_sync_time TEXT,
+      total_records INTEGER DEFAULT 0
+    );
+
+    -- 8. ตารางบัญชีและคำนวณค่าจ้าง (payroll_records) แบ่ง 3 หมวด
+    CREATE TABLE IF NOT EXISTS payroll_records (
+      id TEXT PRIMARY KEY,
+      payroll_no TEXT UNIQUE,
+      category TEXT NOT NULL,          -- 'medical_clinic', 'interpreter_clinic', 'interpreter_hospital'
+      person_id TEXT NOT NULL,
+      person_name TEXT NOT NULL,
+      role_or_language TEXT,
+      reference_job_id TEXT,           -- เชื่อมกับ jobs.id (กรณีไป รพ.)
+      work_date TEXT NOT NULL,
+      hours_worked REAL DEFAULT 0,
+      rate_per_unit REAL NOT NULL,     -- อัตราค่าจ้าง (บาท/ชม. หรือ บาท/กะ)
+      travel_allowance REAL DEFAULT 0, -- ค่าเดินทางไป รพ.
+      special_bonus REAL DEFAULT 0,    -- ค่า OT หรือเบี้ยเลี้ยงพิเศษ
+      total_amount REAL NOT NULL,      -- ยอดสุทธิ
+      payment_status TEXT DEFAULT 'pending', -- 'pending' (รออนุมัติ), 'approved' (อนุมัติแล้ว), 'paid' (จ่ายแล้ว)
+      payment_date TEXT,
+      payment_method TEXT,             -- 'โอนผ่านธนาคาร', 'พร้อมเพย์', 'เงินสด'
+      notes TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(reference_job_id) REFERENCES jobs(id)
+    );
   `);
 
-  // Seed sample jobs if table is empty
-  const count = db.prepare('SELECT count(*) as count FROM jobs').get().count;
-  if (count === 0) {
-    seedInitialData();
-  }
+  // Seed default data if empty
+  seedFullEcosystem();
 }
 
-function seedInitialData() {
-  const insertJob = db.prepare(`
-    INSERT INTO jobs (
-      id, job_no, interpreter_name, hospital_name, department,
-      patient_name, patient_hn, language, appointment_time,
-      status, created_at, summary_notes
-    ) VALUES (
-      ?, ?, ?, ?, ?,
-      ?, ?, ?, ?,
-      ?, ?, ?
-    )
-  `);
+function seedFullEcosystem() {
+  const staffCount = db.prepare('SELECT count(*) as count FROM staff').get().count;
+  if (staffCount > 0) return;
 
   const now = new Date();
   const todayStr = now.toISOString().split('T')[0];
 
-  // Job 1: Ready for check-in today
-  insertJob.run(
-    'job-demo-1',
-    `JOB-${todayStr.replace(/-/g, '')}-001`,
-    'สมชาย ล่ามมือโปร',
-    'โรงพยาบาลบำรุงราษฎร์ (Bumrungrad International)',
-    'แผนกอายุรกรรม (Internal Medicine)',
-    'Mr. Kenji Takahashi',
-    'HN-982341',
-    'ภาษาญี่ปุ่น (Japanese)',
-    `${todayStr} 09:30`,
-    'assigned',
-    new Date(now.getTime() - 3600000).toISOString(),
-    'คนไข้มีอาการปวดท้องต่อเนื่อง 3 วัน มีประวัติแพ้ยาเพนิซิลลิน'
+  // 1. Seed Medical Staff (แพทย์ พยาบาล เจ้าหน้าที่)
+  const insertStaff = db.prepare(`
+    INSERT INTO staff (id, staff_code, name, role, department, license_no, phone, email, line_id, shift_rate, status, notes, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  insertStaff.run(
+    'stf-1', 'MED-101', 'นพ. วิทยา วชิรเวช', 'แพทย์', 'แผนกอายุรกรรม',
+    'ว. 48921', '081-445-1234', 'dr.wittaya@tzuchiclinic.org', 'dr.wittaya',
+    3500, 'active', 'แพทย์ประจำคลินิก เชี่ยวชาญโรคระบบทางเดินอาหาร', now.toISOString()
   );
 
-  // Job 2: Afternoon assignment
-  insertJob.run(
-    'job-demo-2',
-    `JOB-${todayStr.replace(/-/g, '')}-002`,
-    'สมชาย ล่ามมือโปร',
-    'โรงพยาบาลกรุงเทพ (Bangkok Hospital)',
-    'ศูนย์ศัลยกรรมกระดูกและข้อ (Orthopedic Center)',
-    'Ms. Sarah Jenkins',
-    'HN-771204',
-    'ภาษาอังกฤษ (English)',
-    `${todayStr} 14:00`,
-    'assigned',
-    new Date(now.getTime() - 7200000).toISOString(),
-    'ติดตามอาการหลังผ่าตัดส่องกล้องข้อเข่า (Follow-up Post-op)'
+  insertStaff.run(
+    'stf-2', 'MED-102', 'พญ. นภาพร จิตพิสุทธิ์', 'แพทย์', 'ศูนย์ตรวจสุขภาพ & กุมารเวช',
+    'ว. 52109', '089-234-5678', 'dr.naphaporn@tzuchiclinic.org', 'dr.naphaporn',
+    3500, 'active', 'แพทย์ตรวจสุขภาพ Executive Check-up', now.toISOString()
   );
 
-  // Job 3: Chinese interpreter job
-  insertJob.run(
-    'job-demo-3',
-    `JOB-${todayStr.replace(/-/g, '')}-003`,
-    'สมชาย ล่ามมือโปร',
-    'โรงพยาบาลพระรามเก้า (Praram 9 Hospital)',
-    'ศูนย์ตรวจสุขภาพ (Health Check-up Center)',
-    'Mr. Wang Wei (王伟)',
-    'HN-554190',
-    'ภาษาจีน (Chinese)',
-    `${todayStr} 16:30`,
-    'assigned',
-    new Date(now.getTime() - 10800000).toISOString(),
-    'แปลผลการตรวจสุขภาพประจำปี Executive Program'
+  insertStaff.run(
+    'stf-3', 'NUR-201', 'พว. กรรณิการ์ สุขสวัสดิ์', 'พยาบาลวิชาชีพ', 'แผนกอายุรกรรม & ผู้ป่วยวิกฤต',
+    'พย. 88124', '086-789-0123', 'kannika.s@tzuchiclinic.org', 'kannika_nurse',
+    1600, 'active', 'หัวหน้าพยาบาลเวรเช้า', now.toISOString()
   );
 
-  console.log('Sample hospital jobs seeded successfully.');
+  insertStaff.run(
+    'stf-4', 'NUR-202', 'พว. ธีรภัทร ชาญวิทย์', 'พยาบาลวิชาชีพ', 'แผนกฉุกเฉิน & เวชระเบียน',
+    'พย. 90432', '085-112-3344', 'theerapat@tzuchiclinic.org', 'theera_n',
+    1600, 'active', 'พยาบาลเวรบ่าย/คัดกรอง Triage', now.toISOString()
+  );
+
+  insertStaff.run(
+    'stf-5', 'CRD-301', 'คุณมณีรัตน์ วงศ์สว่าง', 'ประสานงาน', 'ศูนย์ประสานงานผู้ป่วยต่างชาติ (International Center)',
+    '-', '082-998-8776', 'maneerat@tzuchiclinic.org', 'manee_coord',
+    1200, 'active', 'ผู้ประสานงานจัดส่งล่ามและประสานงานสถานทูต', now.toISOString()
+  );
+
+  // 2. Seed Interpreters (ล่ามแปลภาษา)
+  const insertInterp = db.prepare(`
+    INSERT INTO interpreters (
+      id, interpreter_code, name, languages, certification, experience_years,
+      hourly_rate_clinic, hourly_rate_hospital, travel_allowance, phone, email, line_id,
+      status, preferred_hospitals, rating, notes, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  insertInterp.run(
+    'int-1', 'INT-01', 'สมชาย ล่ามมือโปร', 'ภาษาญี่ปุ่น, ภาษาอังกฤษ', 'JLPT N1 / ประกาศนียบัตรล่ามแพทย์สากล', 8,
+    500, 800, 350, '089-111-2233', 'somchai.jp@gmail.com', 'somchai_translator',
+    'available', 'รพ.บำรุงราษฎร์, รพ.กรุงเทพ, รพ.สมิติเวช', 4.95,
+    'เชี่ยวชาญการแปลโรคระบบประสาทและศัลยกรรมกระดูก', now.toISOString()
+  );
+
+  insertInterp.run(
+    'int-2', 'INT-02', 'คุณหลิน ซินอี๋ (Lin Xinyi)', 'ภาษาจีน, ภาษาอังกฤษ', 'HSK ระดับ 6 / ล่ามเวชศาสตร์ชะลอวัย', 6,
+    450, 750, 300, '087-333-4455', 'xinyi.lin@gmail.com', 'lin_chinese',
+    'available', 'รพ.พระรามเก้า, รพ.เมดพาร์ค, รพ.พญาไท 2', 4.90,
+    'เชี่ยวชาญกลุ่มผู้ป่วยจีน Medical Tourism และตรวจสุขภาพ', now.toISOString()
+  );
+
+  insertInterp.run(
+    'int-3', 'INT-03', 'คุณฮิเดกิ ทานากะ (Tanaka)', 'ภาษาญี่ปุ่น, ภาษาไทย', 'เจ้าของภาษา (Native Japanese) / ล่ามการแพทย์ 10 ปี', 10,
+    550, 900, 400, '081-555-6677', 'tanaka.bkk@gmail.com', 'tanaka_sensei',
+    'on_duty', 'รพ.สมิติเวช สุขุมวิท, รพ.บำรุงราษฎร์', 5.00,
+    'ล่ามอาวุโส ประจำเคสฉุกเฉินและผ่าตัดใหญ่', now.toISOString()
+  );
+
+  insertInterp.run(
+    'int-4', 'INT-04', 'คุณอับดุลเลาะห์ มานโซร์', 'ภาษาอาหรับ, ภาษาอังกฤษ', 'วุฒิภาษาอาหรับธุรกิจและการแพทย์ (Cairo Univ.)', 5,
+    500, 800, 350, '084-222-7788', 'abdullah.ar@gmail.com', 'abdullah_ar',
+    'available', 'รพ.บำรุงราษฎร์, รพ.กรุงเทพ', 4.85,
+    'เชี่ยวชาญดูแลผู้ป่วยกลุ่มตะวันออกกลางและญาติ', now.toISOString()
+  );
+
+  // 3. Seed Shifts (กะทำงานแยก เมดิคอลทีม vs ล่าม)
+  const insertShift = db.prepare(`
+    INSERT INTO shifts (id, team_type, person_id, person_name, role_or_language, shift_name, shift_date, start_time, end_time, workplace, status, notes, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  // กะเมดิคอลทีม
+  insertShift.run('shf-m1', 'medical', 'stf-1', 'นพ. วิทยา วชิรเวช', 'แพทย์อายุรกรรม', 'กะเช้า (08:00 - 16:00)', todayStr, '08:00', '16:00', 'คลินิกหลัก ห้องตรวจ 1', 'on_duty', 'ออกตรวจ OPD ทั่วไป', now.toISOString());
+  insertShift.run('shf-m2', 'medical', 'stf-3', 'พว. กรรณิการ์ สุขสวัสดิ์', 'พยาบาลวิชาชีพ', 'กะเช้า (07:30 - 15:30)', todayStr, '07:30', '15:30', 'คลินิกหลัก จุดคัดกรอง', 'on_duty', 'วัดสัญญาณชีพและเจาะเลือด', now.toISOString());
+  insertShift.run('shf-m3', 'medical', 'stf-2', 'พญ. นภาพร จิตพิสุทธิ์', 'แพทย์ตรวจสุขภาพ', 'กะบ่าย (14:00 - 22:00)', todayStr, '14:00', '22:00', 'คลินิกหลัก ห้องตรวจ 2', 'scheduled', 'ตรวจคลินิกพิเศษช่วงเย็น', now.toISOString());
+
+  // กะทีมล่าม
+  insertShift.run('shf-i1', 'interpreter', 'int-1', 'สมชาย ล่ามมือโปร', 'ภาษาญี่ปุ่น', 'กะประจำคลินิก (08:00 - 17:00)', todayStr, '08:00', '17:00', 'เคาน์เตอร์ผู้ป่วยต่างชาติ คลินิกหลัก', 'on_duty', 'ล่ามประจำจุดต้อนรับ', now.toISOString());
+  insertShift.run('shf-i2', 'interpreter', 'int-2', 'คุณหลิน ซินอี๋ (Lin Xinyi)', 'ภาษาจีน', 'กะ On-Call สแตนด์บาย (09:00 - 18:00)', todayStr, '09:00', '18:00', 'สแตนด์บายรับเคส รพ.พระรามเก้า', 'scheduled', 'พร้อมเดินทางเมื่อมีเคสเรียก', now.toISOString());
+
+  // 4. Seed HIP CiF93s-VL Device Config
+  db.prepare(`
+    INSERT OR REPLACE INTO device_configs (id, device_name, model, ip_address, port, comm_key, is_active, last_sync_time, total_records)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    'hip-dev-1',
+    'เครื่องสแกนใบหน้า ประตูทางเข้าคลินิกหลัก',
+    'HIP CiF93s-VL',
+    '192.168.1.201',
+    4370,
+    '0',
+    1,
+    `${todayStr} 08:05:00`,
+    1240
+  );
+
+  // 5. Seed Attendance Logs from HIP CiF93s-VL
+  const insertLog = db.prepare(`
+    INSERT INTO attendance_logs (id, device_model, device_ip, enroll_no, person_id, person_name, person_type, scan_time, verify_mode, punch_state, sync_source, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  insertLog.run('att-1', 'HIP CiF93s-VL', '192.168.1.201', '101', 'stf-1', 'นพ. วิทยา วชิรเวช', 'medical', `${todayStr} 07:55:12`, 'Face', 'Check-In', 'network_sync', now.toISOString());
+  insertLog.run('att-2', 'HIP CiF93s-VL', '192.168.1.201', '201', 'stf-3', 'พว. กรรณิการ์ สุขสวัสดิ์', 'medical', `${todayStr} 07:22:45`, 'Face', 'Check-In', 'network_sync', now.toISOString());
+  insertLog.run('att-3', 'HIP CiF93s-VL', '192.168.1.201', '301', 'int-1', 'สมชาย ล่ามมือโปร', 'interpreter', `${todayStr} 07:58:30`, 'Face', 'Check-In', 'network_sync', now.toISOString());
+
+  // 6. Seed Payroll Records (3 categories)
+  const insertPay = db.prepare(`
+    INSERT INTO payroll_records (
+      id, payroll_no, category, person_id, person_name, role_or_language,
+      reference_job_id, work_date, hours_worked, rate_per_unit, travel_allowance,
+      special_bonus, total_amount, payment_status, payment_date, payment_method, notes, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  // หมวด 1: ค่าจ้างเมดิคอลคลินิก
+  insertPay.run(
+    'pay-1', 'PAY-MED-001', 'medical_clinic', 'stf-1', 'นพ. วิทยา วชิรเวช', 'แพทย์อายุรกรรม',
+    null, todayStr, 8, 3500, 0, 500, 4000, 'approved', null, 'โอนผ่านธนาคาร',
+    'ค่าเวรตรวจ OPD เช้า 8 ชม. + ค่า DF เคสพิเศษ 500 บาท', now.toISOString()
+  );
+
+  insertPay.run(
+    'pay-2', 'PAY-MED-002', 'medical_clinic', 'stf-3', 'พว. กรรณิการ์ สุขสวัสดิ์', 'พยาบาลวิชาชีพ',
+    null, todayStr, 8, 1600, 0, 200, 1800, 'approved', null, 'โอนผ่านธนาคาร',
+    'ค่ากะพยาบาล 8 ชม. + ค่าตรวจแล็บเร่งด่วน', now.toISOString()
+  );
+
+  // หมวด 2: ค่าจ้างล่ามทำงานที่คลินิก
+  insertPay.run(
+    'pay-3', 'PAY-INTCLI-001', 'interpreter_clinic', 'int-1', 'สมชาย ล่ามมือโปร', 'ภาษาญี่ปุ่น',
+    null, todayStr, 8, 500, 0, 0, 4000, 'pending', null, 'พร้อมเพย์',
+    'ค่าเวรล่ามประจำคลินิก 8 ชม. (08:00 - 16:00)', now.toISOString()
+  );
+
+  // หมวด 3: ค่าจ้างล่ามทำงานที่ รพ.
+  insertPay.run(
+    'pay-4', 'PAY-INTHOSP-001', 'interpreter_hospital', 'int-1', 'สมชาย ล่ามมือโปร', 'ภาษาญี่ปุ่น',
+    'job-demo-1', todayStr, 3.5, 800, 350, 0, 3150, 'paid', `${todayStr} 16:30`, 'โอนผ่านธนาคาร',
+    'แปลเคสคนไข้ Mr. Kenji Takahashi รพ.บำรุงราษฎร์ (3.5 ชม. x 800 + ค่าเดินทาง 350)', now.toISOString()
+  );
+
+  console.log('Full HR, Shifts, HIP Biometrics & Payroll ecosystem seeded successfully!');
 }
 
 initDatabase();
