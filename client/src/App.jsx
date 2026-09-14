@@ -1,174 +1,58 @@
-import React, { useState, useEffect } from 'react';
-import ProMaxHeader from './components/ProMaxHeader';
-import ProMaxNavBar from './components/ProMaxNavBar';
-import TodayJobs from './pages/TodayJobs';
-import ActiveJob from './pages/ActiveJob';
-import UploadDocPage from './pages/UploadDocPage';
+import React, { useState } from 'react';
+import DesktopHeader from './components/DesktopHeader';
 import PersonnelDirectory from './pages/PersonnelDirectory';
 import ShiftManagement from './pages/ShiftManagement';
 import HipAttendancePage from './pages/HipAttendancePage';
 import AccountingPayrollPage from './pages/AccountingPayrollPage';
 import ReportsDashboard from './pages/ReportsDashboard';
-import NewJobModal from './components/NewJobModal';
-import { fetchJobs, fetchJobById } from './services/api';
+import DesktopHospitalJobs from './pages/DesktopHospitalJobs';
+import InterpreterPortal from './pages/InterpreterPortal';
 
 export default function App() {
-  // Main Module: 'jobs' | 'personnel' | 'shifts' | 'attendance' | 'payroll' | 'reports'
-  const [activeModule, setActiveModule] = useState('jobs');
+  // Top-Level Portal Mode: 'desktop' (ระบบคลินิกเต็มจอ) vs 'interpreter' (โหมดล่าม รพ. บนมือถือ)
+  const [portalMode, setPortalMode] = useState('desktop');
 
-  // Sub-navigation inside 'jobs' module
-  const [jobSubView, setJobSubView] = useState('list'); // 'list' | 'active_job' | 'upload_doc'
-  const [jobs, setJobs] = useState([]);
-  const [selectedJob, setSelectedJob] = useState(null);
-  const [isNewJobOpen, setIsNewJobOpen] = useState(false);
-  const [loadingJobs, setLoadingJobs] = useState(true);
+  // Desktop active module: 'personnel' | 'shifts' | 'attendance' | 'payroll' | 'reports' | 'jobs'
+  const [activeModule, setActiveModule] = useState('personnel');
 
-  useEffect(() => {
-    loadJobs();
-  }, []);
+  // 1. If user is in Hospital Interpreter Mode -> Render dedicated Mobile Portal directly!
+  if (portalMode === 'interpreter') {
+    return <InterpreterPortal onSwitchToDesktop={() => setPortalMode('desktop')} />;
+  }
 
-  const loadJobs = async () => {
-    setLoadingJobs(true);
-    try {
-      const res = await fetchJobs('all');
-      if (res.success) {
-        setJobs(res.data);
-        if (!selectedJob && res.data.length > 0) {
-          const defaultActive = res.data.find((j) => j.status !== 'completed') || res.data[0];
-          setSelectedJob(defaultActive);
-        }
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoadingJobs(false);
-    }
-  };
-
-  const handleSelectJob = async (job) => {
-    try {
-      const res = await fetchJobById(job.id);
-      if (res.success) {
-        setSelectedJob(res.data);
-      } else {
-        setSelectedJob(job);
-      }
-    } catch (e) {
-      setSelectedJob(job);
-    }
-    setJobSubView('active_job');
-  };
-
-  const handleJobUpdated = (updatedJob) => {
-    if (updatedJob) setSelectedJob(updatedJob);
-    loadJobs();
-  };
-
-  const handleNewJobCreated = (newJob) => {
-    setSelectedJob(newJob);
-    loadJobs();
-    setJobSubView('active_job');
-  };
-
+  // 2. Otherwise -> Render Full Desktop Clinic & Management Layout
   return (
     <div className="flex flex-col min-h-screen bg-slate-100 text-slate-800 antialiased font-sans">
-      {/* iPhone Pro Max Optimized Container (max-w-[540px]) */}
-      <div className="w-full max-w-[540px] mx-auto min-h-screen flex flex-col bg-white shadow-2xl relative border-x border-slate-200/60">
-        {/* Top Header */}
-        <ProMaxHeader
-          activeModule={activeModule}
-          onSelectModule={setActiveModule}
-        />
+      {/* Full Desktop Header */}
+      <DesktopHeader
+        activeModule={activeModule}
+        onSelectModule={setActiveModule}
+        onSwitchToInterpreterPortal={() => setPortalMode('interpreter')}
+      />
 
-        {/* Dynamic Body Content */}
-        <main className="flex-1 p-4 overflow-y-auto">
-          {/* MODULE 1: HOSPITAL JOBS */}
-          {activeModule === 'jobs' && (
-            <>
-              {jobSubView === 'list' && (
-                <TodayJobs
-                  jobs={jobs}
-                  onSelectJob={handleSelectJob}
-                  onOpenNewJobModal={() => setIsNewJobOpen(true)}
-                  loading={loadingJobs}
-                />
-              )}
+      {/* Main Desktop Container (max-w-7xl) */}
+      <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-6">
+        {activeModule === 'personnel' && <PersonnelDirectory />}
+        {activeModule === 'shifts' && <ShiftManagement />}
+        {activeModule === 'attendance' && <HipAttendancePage />}
+        {activeModule === 'payroll' && <AccountingPayrollPage />}
+        {activeModule === 'reports' && <ReportsDashboard />}
+        {activeModule === 'jobs' && <DesktopHospitalJobs />}
+      </main>
 
-              {jobSubView === 'active_job' && (
-                selectedJob ? (
-                  <ActiveJob
-                    job={selectedJob}
-                    onBack={() => setJobSubView('list')}
-                    onNavigateToDocs={() => setJobSubView('upload_doc')}
-                    onJobUpdated={handleJobUpdated}
-                  />
-                ) : (
-                  <div className="p-8 text-center space-y-3">
-                    <p className="text-xs text-slate-500">กรุณาเลือกเคสงานจากรายการ</p>
-                    <button
-                      onClick={() => setJobSubView('list')}
-                      className="px-4 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold"
-                    >
-                      กลับไปรายการงาน
-                    </button>
-                  </div>
-                )
-              )}
-
-              {jobSubView === 'upload_doc' && (
-                selectedJob ? (
-                  <UploadDocPage
-                    jobId={selectedJob.id}
-                    onBack={() => setJobSubView('active_job')}
-                    onJobUpdated={loadJobs}
-                  />
-                ) : (
-                  <div className="p-8 text-center space-y-3">
-                    <button
-                      onClick={() => setJobSubView('list')}
-                      className="px-4 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold"
-                    >
-                      กลับไปรายการงาน
-                    </button>
-                  </div>
-                )
-              )}
-            </>
-          )}
-
-          {/* MODULE 2: CLINIC PERSONNEL (STAFF & INTERPRETERS) */}
-          {activeModule === 'personnel' && <PersonnelDirectory />}
-
-          {/* MODULE 3: SHIFTS MANAGEMENT */}
-          {activeModule === 'shifts' && <ShiftManagement />}
-
-          {/* MODULE 4: HIP CiF93s-VL ATTENDANCE */}
-          {activeModule === 'attendance' && <HipAttendancePage />}
-
-          {/* MODULE 5: ACCOUNTING & PAYROLL */}
-          {activeModule === 'payroll' && <AccountingPayrollPage />}
-
-          {/* MODULE 6: EXECUTIVE REPORTS */}
-          {activeModule === 'reports' && <ReportsDashboard />}
-        </main>
-
-        {/* Bottom Navigation Bar */}
-        <ProMaxNavBar
-          activeModule={activeModule}
-          onSelectModule={(mod) => {
-            setActiveModule(mod);
-            if (mod === 'jobs') setJobSubView('list');
-          }}
-        />
-
-        {/* New Job Modal */}
-        <NewJobModal
-          isOpen={isNewJobOpen}
-          onClose={() => setIsNewJobOpen(false)}
-          onCreated={handleNewJobCreated}
-          interpreterName="สมชาย ล่ามมือโปร"
-        />
-      </div>
+      {/* Desktop Footer */}
+      <footer className="bg-white border-t border-slate-200 py-4 text-center text-xs text-slate-500">
+        <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
+          <span>© 2026 Tzuchi Clinic & Medical Interpreter Foundation. All rights reserved.</span>
+          <div className="flex items-center gap-3 text-slate-400">
+            <span>HIP CiF93s-VL Biometrics</span>
+            <span>•</span>
+            <span>GPS Tracking Ready</span>
+            <span>•</span>
+            <span>3-Tier Payroll</span>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }
