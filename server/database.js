@@ -152,10 +152,20 @@ function initDatabase() {
       created_at TEXT NOT NULL,
       FOREIGN KEY(reference_job_id) REFERENCES jobs(id)
     );
+
+    -- 9. ตารางสถานที่ประจำ / จุดปฏิบัติงาน ที่ Admin กำหนดได้
+    CREATE TABLE IF NOT EXISTS workplaces (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      type TEXT DEFAULT 'clinic', -- 'clinic' หรือ 'hospital'
+      description TEXT,
+      created_at TEXT NOT NULL
+    );
   `);
 
   // Seed default data if empty
   seedFullEcosystem();
+  seedWorkplaces();
 }
 
 function seedFullEcosystem() {
@@ -244,14 +254,14 @@ function seedFullEcosystem() {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
-  // กะเมดิคอลทีม
-  insertShift.run('shf-m1', 'medical', 'stf-1', 'นพ. วิทยา วชิรเวช', 'แพทย์อายุรกรรม', 'กะเช้า (08:00 - 16:00)', todayStr, '08:00', '16:00', 'คลินิกหลัก ห้องตรวจ 1', 'on_duty', 'ออกตรวจ OPD ทั่วไป', now.toISOString());
-  insertShift.run('shf-m2', 'medical', 'stf-3', 'พว. กรรณิการ์ สุขสวัสดิ์', 'พยาบาลวิชาชีพ', 'กะเช้า (07:30 - 15:30)', todayStr, '07:30', '15:30', 'คลินิกหลัก จุดคัดกรอง', 'on_duty', 'วัดสัญญาณชีพและเจาะเลือด', now.toISOString());
-  insertShift.run('shf-m3', 'medical', 'stf-2', 'พญ. นภาพร จิตพิสุทธิ์', 'แพทย์ตรวจสุขภาพ', 'กะบ่าย (14:00 - 22:00)', todayStr, '14:00', '22:00', 'คลินิกหลัก ห้องตรวจ 2', 'scheduled', 'ตรวจคลินิกพิเศษช่วงเย็น', now.toISOString());
+  // กะเมดิคอลทีม (กะมาตรฐาน 07:00 - 16:30 น. มีกะเดียว)
+  insertShift.run('shf-m1', 'medical', 'stf-1', 'นพ. วิทยา วชิรเวช', 'แพทย์อายุรกรรม', 'กะมาตรฐาน (07:00 - 16:30 น.)', todayStr, '07:00', '16:30', 'คลินิกหลัก ห้องตรวจ 1 (OPD 1)', 'on_duty', 'ออกตรวจ OPD ทั่วไป', now.toISOString());
+  insertShift.run('shf-m2', 'medical', 'stf-3', 'พว. กรรณิการ์ สุขสวัสดิ์', 'พยาบาลวิชาชีพ', 'กะมาตรฐาน (07:00 - 16:30 น.)', todayStr, '07:00', '16:30', 'คลินิกหลัก จุดคัดกรอง (Triage)', 'on_duty', 'วัดสัญญาณชีพและเจาะเลือด', now.toISOString());
+  insertShift.run('shf-m3', 'medical', 'stf-2', 'พญ. นภาพร จิตพิสุทธิ์', 'แพทย์ตรวจสุขภาพ', 'กะมาตรฐาน (07:00 - 16:30 น.)', todayStr, '07:00', '16:30', 'คลินิกหลัก ห้องตรวจ 2 (OPD 2)', 'scheduled', 'ตรวจสุขภาพและโรคเรื้อรัง', now.toISOString());
 
-  // กะทีมล่าม
-  insertShift.run('shf-i1', 'interpreter', 'int-1', 'สมชาย ล่ามมือโปร', 'ภาษาญี่ปุ่น', 'กะประจำคลินิก (08:00 - 17:00)', todayStr, '08:00', '17:00', 'เคาน์เตอร์ผู้ป่วยต่างชาติ คลินิกหลัก', 'on_duty', 'ล่ามประจำจุดต้อนรับ', now.toISOString());
-  insertShift.run('shf-i2', 'interpreter', 'int-2', 'คุณหลิน ซินอี๋ (Lin Xinyi)', 'ภาษาจีน', 'กะ On-Call สแตนด์บาย (09:00 - 18:00)', todayStr, '09:00', '18:00', 'สแตนด์บายรับเคส รพ.พระรามเก้า', 'scheduled', 'พร้อมเดินทางเมื่อมีเคสเรียก', now.toISOString());
+  // กะทีมล่าม (กะมาตรฐาน 07:00 - 16:30 น.)
+  insertShift.run('shf-i1', 'interpreter', 'int-1', 'สมชาย ล่ามมือโปร', 'ภาษาญี่ปุ่น', 'กะมาตรฐาน (07:00 - 16:30 น.)', todayStr, '07:00', '16:30', 'เคาน์เตอร์ประสานงานล่ามต่างชาติ', 'on_duty', 'ล่ามประจำจุดต้อนรับ', now.toISOString());
+  insertShift.run('shf-i2', 'interpreter', 'int-2', 'คุณหลิน ซินอี๋ (Lin Xinyi)', 'ภาษาจีน', 'กะมาตรฐาน (07:00 - 16:30 น.)', todayStr, '07:00', '16:30', 'โรงพยาบาลพระรามเก้า (Praram 9 Hospital)', 'scheduled', 'ล่ามประจำโรงพยาบาล', now.toISOString());
 
   // 4. Seed HIP CiF93s-VL Device Config
   db.prepare(`
@@ -318,9 +328,38 @@ function seedFullEcosystem() {
   console.log('Full HR, Shifts, HIP Biometrics & Payroll ecosystem seeded successfully!');
 }
 
+function seedWorkplaces() {
+  const count = db.prepare('SELECT count(*) as count FROM workplaces').get().count;
+  if (count > 0) return;
+
+  const insert = db.prepare(`
+    INSERT INTO workplaces (id, name, type, description, created_at)
+    VALUES (?, ?, ?, ?, ?)
+  `);
+
+  const initialWorkplaces = [
+    { id: 'wp-1', name: 'คลินิกหลัก จุดคัดกรอง (Triage)', type: 'clinic', desc: 'จุดซักประวัติ วัดความดัน และเจาะเลือด' },
+    { id: 'wp-2', name: 'คลินิกหลัก ห้องตรวจ 1 (OPD 1)', type: 'clinic', desc: 'ห้องตรวจอายุรกรรมทั่วไป' },
+    { id: 'wp-3', name: 'คลินิกหลัก ห้องตรวจ 2 (OPD 2)', type: 'clinic', desc: 'ห้องตรวจศูนย์ตรวจสุขภาพ & กุมารเวช' },
+    { id: 'wp-4', name: 'คลินิกหลัก แผนกตรวจสุขภาพ (Check-up)', type: 'clinic', desc: 'ศูนย์ตรวจสุขภาพแรงงานและคนไข้ต่างชาติ' },
+    { id: 'wp-5', name: 'เคาน์เตอร์ประสานงานล่ามต่างชาติ', type: 'clinic', desc: 'จุดต้อนรับและบริการแปลภาษาผู้ป่วยต่างชาติ' },
+    { id: 'wp-6', name: 'ห้องยาและเวชระเบียน (Pharmacy & Records)', type: 'clinic', desc: 'จุดจ่ายยาและจัดเก็บเวชระเบียน' },
+    { id: 'wp-7', name: 'โรงพยาบาลบำรุงราษฎร์ (Bumrungrad)', type: 'hospital', desc: 'รพ. ปลายทาง ส่งล่ามออกหน้างาน' },
+    { id: 'wp-8', name: 'โรงพยาบาลกรุงเทพ (Bangkok Hospital)', type: 'hospital', desc: 'รพ. ปลายทาง ส่งล่ามออกหน้างาน' },
+    { id: 'wp-9', name: 'โรงพยาบาลพระรามเก้า (Praram 9 Hospital)', type: 'hospital', desc: 'รพ. ปลายทาง ส่งล่ามออกหน้างาน' },
+  ];
+
+  initialWorkplaces.forEach((wp) => {
+    insert.run(wp.id, wp.name, wp.type, wp.desc, new Date().toISOString());
+  });
+
+  console.log('Workplaces seeded successfully!');
+}
+
 initDatabase();
 
 module.exports = {
   db,
   initDatabase,
 };
+

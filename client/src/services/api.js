@@ -174,6 +174,26 @@ export async function deleteShift(id) {
   return await res.json();
 }
 
+// Workplaces Management
+export async function fetchWorkplaces() {
+  const res = await fetch(`${API_BASE}/workplaces`);
+  return await res.json();
+}
+
+export async function createWorkplace(data) {
+  const res = await fetch(`${API_BASE}/workplaces`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  return await res.json();
+}
+
+export async function deleteWorkplace(id) {
+  const res = await fetch(`${API_BASE}/workplaces/${id}`, { method: 'DELETE' });
+  return await res.json();
+}
+
 // ==============================
 // 5. HIP CiF93s-VL ATTENDANCE
 // ==============================

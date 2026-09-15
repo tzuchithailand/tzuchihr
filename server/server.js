@@ -426,17 +426,28 @@ app.delete('/api/interpreters/:id', (req, res) => {
 app.get('/api/shifts', (req, res) => {
   try {
     const { team_type, date } = req.query;
-    let query = 'SELECT * FROM shifts WHERE 1=1';
+    let query = `
+      SELECT s.*, 
+        CASE 
+          WHEN s.team_type = 'medical' THEN st.staff_code
+          WHEN s.team_type = 'interpreter' THEN ip.interpreter_code
+          ELSE NULL
+        END as person_code
+      FROM shifts s
+      LEFT JOIN staff st ON s.person_id = st.id
+      LEFT JOIN interpreters ip ON s.person_id = ip.id
+      WHERE 1=1
+    `;
     const params = [];
     if (team_type && team_type !== 'all') {
-      query += ' AND team_type = ?';
+      query += ' AND s.team_type = ?';
       params.push(team_type);
     }
     if (date) {
-      query += ' AND shift_date = ?';
+      query += ' AND s.shift_date = ?';
       params.push(date);
     }
-    query += ' ORDER BY shift_date DESC, start_time ASC';
+    query += ' ORDER BY s.shift_date DESC, s.start_time ASC';
     const shifts = db.prepare(query).all(...params);
     res.json({ success: true, data: shifts });
   } catch (err) {
@@ -455,7 +466,20 @@ app.post('/api/shifts', (req, res) => {
     db.prepare(`
       INSERT INTO shifts (id, team_type, person_id, person_name, role_or_language, shift_name, shift_date, start_time, end_time, workplace, status, notes, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', ?, ?)
-    `).run(id, team_type, person_id || 'manual', person_name, role_or_language || '', shift_name || 'กะเช้า', shift_date, start_time || '08:00', end_time || '16:00', workplace || 'คลินิก', notes || '', new Date().toISOString());
+    `).run(
+      id,
+      team_type,
+      person_id || 'manual',
+      person_name,
+      role_or_language || '',
+      shift_name || 'กะมาตรฐาน (07:00 - 16:30 น.)',
+      shift_date,
+      start_time || '07:00',
+      end_time || '16:30',
+      workplace || 'คลินิกหลัก จุดคัดกรอง (Triage)',
+      notes || '',
+      new Date().toISOString()
+    );
 
     const created = db.prepare('SELECT * FROM shifts WHERE id = ?').get(id);
     res.json({ success: true, message: 'บันทึกกะทำงานสำเร็จ', data: created });
@@ -479,6 +503,44 @@ app.delete('/api/shifts/:id', (req, res) => {
   try {
     db.prepare('DELETE FROM shifts WHERE id = ?').run(req.params.id);
     res.json({ success: true, message: 'ลบกะทำงานสำเร็จ' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// Workplaces / Stations Management (Admin can define & create)
+app.get('/api/workplaces', (req, res) => {
+  try {
+    const workplaces = db.prepare('SELECT * FROM workplaces ORDER BY type ASC, name ASC').all();
+    res.json({ success: true, data: workplaces });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.post('/api/workplaces', (req, res) => {
+  try {
+    const { name, type, description } = req.body;
+    if (!name || !name.trim()) {
+      return res.status(400).json({ success: false, message: 'กรุณาระบุชื่อสถานที่/จุดปฏิบัติงาน' });
+    }
+    const id = `wp-${Date.now()}`;
+    db.prepare(`
+      INSERT INTO workplaces (id, name, type, description, created_at)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(id, name.trim(), type || 'clinic', description || '', new Date().toISOString());
+
+    const created = db.prepare('SELECT * FROM workplaces WHERE id = ?').get(id);
+    res.json({ success: true, message: 'เพิ่มจุดปฏิบัติงานสำเร็จ', data: created });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.delete('/api/workplaces/:id', (req, res) => {
+  try {
+    db.prepare('DELETE FROM workplaces WHERE id = ?').run(req.params.id);
+    res.json({ success: true, message: 'ลบจุดปฏิบัติงานสำเร็จ' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
